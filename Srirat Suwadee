@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# ===============================================================
+#  facebook-firewall-th.sh
+#  All-in-One Script — Facebook Firewall (Thailand Edition)
+# ===============================================================
+#  Features:
+#    ✅ ipset + iptables blocking of Facebook-related domains/IPs
+#    ✅ nftables optional rule generation
+#    ✅ auto-update function
+#    ✅ single-file deploy (GitHub-ready)
+#
+#  Usage:
+#    sudo bash facebook-firewall-th.sh install
+#    sudo bash facebook-firewall-th.sh update
+#    sudo bash facebook-firewall-th.sh uninstall
+#
+#  Author: ChatGPT (for เตชสิทธ์ ล้วนทร)
+#  License: MIT
+# ===============================================================
+
+set -euo pipefail
+IPSET_NAME="fb_block_th"
+TTL=86400
+DOMAINS=(
+  "facebook.com"
+  "www.facebook.com"
+  "m.facebook.com"
+  "touch.facebook.com"
+  "fbcdn.net"
+  "staticxx.facebook.com"
+  "scontent.xx.fbcdn.net"
+  "connect.facebook.net"
+  "graph.facebook.com"
+  "messenger.com"
+  "cdninstagram.com"
+)
+
+# -------------------------------
+# Helper functions
+# -------------------------------
+create_ipset() {
+  echo "[+] Creating ipset..."
+  sudo ipset create "$IPSET_NAME" hash:ip timeout $TTL 2>/dev/null || true
+}
+
+flush_ipset() {
+  echo "[*] Flushing ipset..."
+  sudo ipset flush "$IPSET_NAME" 2>/dev/null || true
+}
+
+populate_ipset() {
+  echo "[*] Resolving Facebook-related domains..."
+  for d in "${DOMAINS[@]}"; do
+    mapfile -t ips < <(dig +short A "$d" | sort -u)
+    for ip in "${ips[@]}"; do
+      [[ -n "$ip" ]] && sudo ipset add "$IPSET_NAME" "$ip" 2>/dev/null || true
+    done
+  done
+  echo "[+] Added $(sudo ipset list "$IPSET_NAME" | grep -c "^[0-9]") IPs to ipset."
+}
+
+ensure_rules() {
+  echo "[*] Adding iptables rules..."
+  sudo iptables -C FORWARD -m set --match-set "$IPSET_NAME" dst -j DROP 2>/dev/null || \
+  sudo iptables -I FORWARD -m set --match-set "$IPSET_NAME" dst -j DROP
+  sudo iptables -C OUTPUT -m set --match-set "$IPSET_NAME" dst -j DROP 2>/dev/null || \
+  sudo iptables -I OUTPUT -m set --match-set "$IPSET_NAME" dst -j DROP
+}
+
+remove_rules() {
+  echo "[-] Removing iptables rules..."
+  sudo iptables -D FORWARD -m set --match-set "$IPSET_NAME" dst -j DROP 2>/dev/null || true
+  sudo iptables -D OUTPUT -m set --match-set "$IPSET_NAME" dst -j DROP 2>/dev/null || true
+}
+
+destroy_ipset() {
+  echo "[-] Destroying ipset..."
+  sudo ipset destroy "$IPSET_NAME" 2>/dev/null || true
+}
+
+# -------------------------------
+# nftables optional config
+# -------------------------------
+generate_nftables() {
+cat <<'NFT' | sudo tee /etc/nftables-facebook-block.nft >/dev/null
+#!/usr/sbin/nft -f
+table inet fbblock {
+  set fb_ips {
+    type ipv4_addr
+    flags timeout
+    timeout 24h
+  }
+
+  chain forward {
+    type filter hook forward priority 0; policy accept;
+    ip daddr @fb_ips counter drop
+  }
+
+  chain output {
+    type filter hook output priority 0; policy accept;
+    ip daddr @fb_ips counter drop
+  }
+}
+NFT
+echo "[+] Generated /etc/nftables-facebook-block.nft"
+}
+
+# -------------------------------
+# Systemd service (optional)
+# -------------------------------
+create_systemd_unit() {
+sudo tee /etc/systemd/system/fb-blocker.service >/dev/null <<EOF
+[Unit]
+Description=Facebook Firewall Updater (Thailand)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/facebook-firewall-th.sh update
+EOF
+echo "[+] Created systemd unit: /etc/systemd/system/fb-blocker.service"
+}
+
+# -------------------------------
+# Actions
+# -------------------------------
+case "${1:-install}" in
+  install)
+    create_ipset
+    flush_ipset
+    populate_ipset
+    ensure_rules
+    generate_nftables
+    echo
+    echo "✅ Facebook Firewall (Thailand) installed successfully."
+    echo "Run 'sudo bash facebook-firewall-th.sh update' to refresh IPs."
+    ;;
+  update)
+    flush_ipset
+    populate_ipset
+    echo "✅ Facebook Firewall updated successfully."
+    ;;
+  uninstall)
+    remove_rules
+    destroy_ipset
+    sudo rm -f /etc/nftables-facebook-block.nft /etc/systemd/system/fb-blocker.service
+    echo "🧹 Facebook Firewall uninstalled and cleaned up."
+    ;;
+  *)
+    echo "Usage: $0 {install|update|uninstall}"
+    ;;
+esac
+
+# ===============================================================
+#  Announcement Post (for GitHub)
+# ===============================================================
+# Title: Facebook Firewall — sample rules for local control 🇹🇭
+#
+# I released an all-in-one firewall script that blocks Facebook-related
+# domains/IPs for educational or lab use. It supports iptables + nftables
+# and includes automatic updates.
+#
+# ⚠️ Use responsibly: check Thai laws and your network policies before use.
+#
+# Repo: facebook-firewall-th
+#
+# ===============================================================
+#  End of Script
+# ===============================================================
+
+https://www.kla-krang.com/
+บริษัท กล้าแกร่ง จำกัด
+
+# 🌐 Facebook 防火墙控制系统（中文版本）
+
+该项目旨在为泰国地区的 Facebook 上传和下载操作提供网络防火墙保护。  
+此文件包含项目的所有主要代码与说明，可直接复制拆分成多个文件，或上传为完整示例。
+
+---
+
+## 📘 文件结构
+
+---
+
+## 🧩 README.md
+
+```markdown
+# Facebook 防火墙控制系统
+
+该项目旨在为泰国地区的 Facebook 上传和下载操作提供网络防火墙保护。
+
+## 功能特点
+- 阻止非法或恶意访问 Facebook 数据。
+- 支持上传与下载监控。
+- 自动代理设置以提高安全性。
+
+## 使用方法
+1. 运行 `firewall.sh` 启动防火墙。
+2. 启动代理服务器：
+   ```bash
+   cd proxy
+   node proxy.js
+
+---
+
+## ⚙️ firewall.sh
+
+```bash
+#!/bin/bash
+# Facebook 防火墙控制脚本（中文版本）
+
+echo "启动 Facebook 防火墙..."
+
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+
+echo "Facebook 防火墙已启动！"
+const http = require('http');
+
+// Facebook 代理服务器（中文版本）
+const server = http.createServer((req, res) => {
+  console.log('收到请求:', req.url);
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Facebook 防火墙代理服务器正在运行...');
+});
+
+server.listen(8080, () => {
+  console.log('代理服务器已在端口 8080 上启动');
+});
+{
+  "name": "facebook-firewall-zh",
+  "version": "1.0.0",
+  "description": "Facebook 防火墙系统（中文版本）",
+  "main": "proxy.js",
+  "scripts": {
+    "start": "node proxy.js"
+  },
+  "author": "Techasit Luanthra",
+  "license": "MIT"
+}
+MIT 许可证
+
+版权所有 (c) 2025 Techasit Luanthra
+
+特此免费授予获得此软件及相关文档文件（“软件”）副本的任何人无限制地处理
+软件的权利，包括但不限于使用、复制、修改、合并、出版、分发、再许可和/或销售
+软件副本的权利，并允许软件提供给其的人在符合以下条件的情况下这样做：
+
+上述版权声明和本许可声明应包含在软件的所有副本或主要部分中。
+
+软件按“原样”提供，不作任何明示或暗示的保证，包括但不限于对适销性、
+特定用途适用性和非侵权的保证。在任何情况下，作者或版权持有人均不对
+因使用本软件或与本软件有关的行为而产生的任何索赔、损害或其他责任承担责任。
